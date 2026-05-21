@@ -147,7 +147,9 @@ async def generate_card_html(username: str, github_data: dict, analysis: dict) -
 @mcp.tool()
 async def save_card(username: str, html: str) -> str:
     """Save the generated card HTML to the static directory."""
-    static_dir = os.path.join(os.path.dirname(__file__), "static", "cards")
+    static_dir = os.getenv("CARDS_DIR")
+    if not static_dir:
+        static_dir = os.path.join(os.sep, "tmp", "cards") if os.getenv("K_SERVICE") else os.path.join(os.path.dirname(__file__), "static", "cards")
     os.makedirs(static_dir, exist_ok=True)
     
     file_path = os.path.join(static_dir, f"{username}.html")

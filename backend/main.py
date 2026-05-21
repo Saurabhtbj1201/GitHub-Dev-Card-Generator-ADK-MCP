@@ -16,6 +16,7 @@ from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
 
 # Local imports
 from agent import github_card_agent
+from mcp_server import scrape_github, analyze_profile, generate_card_html, save_card
 
 app = FastAPI(title="GitHub Dev Card Generator")
 
@@ -40,12 +41,23 @@ runner = Runner(
     auto_create_session=True,
 )
 
-# Ensure static directory exists
-STATIC_CARDS_DIR = os.path.join(os.path.dirname(__file__), "static", "cards")
+def _cards_dir() -> str:
+    override = os.getenv("CARDS_DIR")
+    if override:
+        return override
+
+    # Cloud Run services commonly run with a read-only app filesystem; /tmp is always writable.
+    if os.getenv("K_SERVICE"):
+        return os.path.join(os.sep, "tmp", "cards")
+
+    return os.path.join(os.path.dirname(__file__), "static", "cards")
+
+
+STATIC_CARDS_DIR = _cards_dir()
 os.makedirs(STATIC_CARDS_DIR, exist_ok=True)
 
 # Mount static files to serve saved cards
-app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
+app.mount("/static/cards", StaticFiles(directory=STATIC_CARDS_DIR), name="cards")
 
 class GenerateRequest(BaseModel):
     username: str
@@ -73,22 +85,32 @@ async def generate_card(request: GenerateRequest):
                     text = "".join(part.text or "" for part in event.content.parts)
                     if text.strip():
                         last_text = text
-        
-        # The agent's final tool call (save_card) returns the URL.
-        # We can also check if the file exists.
+
         card_path = os.path.join(STATIC_CARDS_DIR, f"{username}.html")
+
+        # Fallback: if the agent doesn't end up calling save_card (tooling can be flaky in some deployments),
+        # run the tool pipeline deterministically to ensure the card exists.
+        if not os.path.exists(card_path):
+            github_data = await scrape_github(username)
+            analysis = await analyze_profile(github_data)
+            html = await generate_card_html(username, github_data, analysis)
+            await save_card(username, html)
+        
         if os.path.exists(card_path):
             with open(card_path, "r", encoding="utf-8") as f:
                 html_content = f.read()
-            
+
             return {
                 "username": username,
                 "card_url": f"/static/cards/{username}.html",
                 "html": html_content,
-                "agent_response": last_text
+                "agent_response": last_text,
             }
-        else:
-            raise HTTPException(status_code=500, detail="Agent completed but card file was not found.")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Card file was not created. Check GOOGLE_API_KEY/GITHUB_TOKEN and Cloud Run filesystem settings.",
+        )
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

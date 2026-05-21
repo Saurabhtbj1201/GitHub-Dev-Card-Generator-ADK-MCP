@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-backend-url="${BACKEND_URL}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -205,6 +205,26 @@
     <script>
         let currentUrl = '';
 
+        function resolveBackendUrl() {
+            const raw = (document.documentElement.dataset.backendUrl || '').trim();
+            const looksUnsubstituted = !raw || raw.includes('${BACKEND_URL}');
+
+            if (!looksUnsubstituted) return raw.replace(/\/$/, '');
+
+            // Local dev fallback (when serving index.html directly / via `python -m http.server`)
+            if (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1') {
+                return 'http://localhost:8080';
+            }
+
+            // If deployed somewhere without BACKEND_URL configured, fail loudly.
+            return '';
+        }
+
+        function joinUrl(base, path) {
+            if (!base) return path;
+            return `${base.replace(/\/$/, '')}${path.startsWith('/') ? '' : '/'}${path}`;
+        }
+
         async function generateCard() {
             const username = document.getElementById('username').value.trim();
             const btn = document.getElementById('gen-btn');
@@ -212,6 +232,13 @@
             const cardContainer = document.getElementById('card-container');
             const actions = document.getElementById('actions');
             const error = document.getElementById('error');
+
+            const backendUrl = resolveBackendUrl();
+            if (!backendUrl) {
+                error.innerText = 'Error: BACKEND_URL is not configured.';
+                error.style.display = 'block';
+                return;
+            }
 
             if (!username) return;
 
@@ -223,7 +250,7 @@
             skeleton.style.display = 'block';
 
             try {
-                const response = await fetch('${BACKEND_URL}/generate', {
+                const response = await fetch(joinUrl(backendUrl, '/generate'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username })
@@ -240,9 +267,7 @@
                 skeleton.style.display = 'none';
                 cardContainer.innerHTML = `<div class="fade-in">${data.html}</div>`;
                 actions.style.display = 'flex';
-                currentUrl = window.location.origin.includes('localhost') 
-                    ? `http://localhost:8080${data.card_url}` 
-                    : `${window.location.origin}${data.card_url}`;
+                currentUrl = joinUrl(backendUrl, data.card_url);
                 
             } catch (err) {
                 skeleton.style.display = 'none';
