@@ -207,9 +207,9 @@
 
         function resolveBackendUrl() {
             const raw = (document.documentElement.dataset.backendUrl || '').trim();
-            const looksUnsubstituted = !raw || raw.includes('${BACKEND_URL}');
+            const looksLikeUrl = /^https?:\/\//i.test(raw);
 
-            if (!looksUnsubstituted) return raw.replace(/\/$/, '');
+            if (looksLikeUrl) return raw.replace(/\/$/, '');
 
             // Local dev fallback (when serving index.html directly / via `python -m http.server`)
             if (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1') {
